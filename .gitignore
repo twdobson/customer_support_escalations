@@ -1,0 +1,6 @@
+# ignore the folder .idea which pycharm automatically creates
+.idea/
+
+# ingnore all files in data (exception below)
+data/**
+
