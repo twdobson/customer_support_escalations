@@ -19,8 +19,8 @@ from config.pandas_output import *
 from source.utils.reader_writers.reader_writers import load_object, write_object
 from source.utils.trained_model_information import TrainedModelInformation
 
-response = 'inverse_time_to_next_escalation'
-MODEL_VERSION = "1_pivoted_milestones_only"
+response = 'response'
+MODEL_VERSION = "2_baseline_recreated"
 MODEL_KEY_COLUMN = 'reference_id'
 
 indices = load_object(path=data_dir.make_processed_path('parameters', 'cv_indices', 'cross_validation_fold_0'))
@@ -34,16 +34,17 @@ params = {
     'objective': 'rmse',
     'n_jobs': -1,
     'seed': 10,
-    'learning_rate': 0.035,
-    'bagging_fraction': 0.3,
+    'learning_rate': 0.01,
+    'bagging_fraction': 0.85,
     'bagging_freq': 1,
     'colsample_bytree': 0.85,
+    # "lambda": 100
     # 'sigmoid': 0.9,
     # "boost_from_average": False,
     # 'force_row_wise': True,
     # 'max_depth': 4,
     # 'min_data_in_leaf': 5,
-    'num_leaves': 30,
+    # 'num_leaves': 30,
     # 'extra_trees': True,
     # "scale_pos_weight" : 3,
     # "is_unbalance": True,
@@ -100,11 +101,15 @@ for validation_fold in range(0, 5, 1):
         feature_columns=feature_columns
     )
 
-    print(model_information.get_feature_importance().head(100))
+    print(model_information.get_feature_importance().head(300))
+
+# ['average_length_of_note_description_null_for_6763', 'proportion_is_milestone_note_6763']
 
 from sklearn.metrics import r2_score
 
 r2_scores = []
+validation_predictions = []
+validation_responses = []
 for fold in range(0, 5, 1):
     model = load_object(path=data_dir.make_processed_path(
         'model',
@@ -117,6 +122,9 @@ for fold in range(0, 5, 1):
     train_validate_file = pd.read_parquet(data_dir.make_processed_path("model_files", 'train_validate_file'))
     predictions = model.predict(train_validate_file.iloc[validation_indices, :][feature_columns])
 
+    validation_predictions.append(predictions)
+    validation_responses.append(train_validate_file.iloc[validation_indices, :][response])
+
     r2 = r2_score(
         y_true=train_validate_file.iloc[validation_indices, :][response],
         y_pred=predictions
@@ -125,6 +133,18 @@ for fold in range(0, 5, 1):
     r2_scores.append(r2)
 
 print(sum(r2_scores) / len(r2_scores))
+sum(validation_predictions[2]) / len(validation_predictions[2])
+
+from source.utils.ml_tools.predicted_vs_observed import PredictedAndObservedRegression
+
+pvo = PredictedAndObservedRegression(
+    predicted=validation_predictions[0],
+    observed=validation_responses[0].astype('float'),
+    quantiles=50,
+    index=validation_responses[0].index
+)
+pvo.plot_predicted_and_observed()
+pvo.plot_pvo()
 
 for fold in range(0, 5, 1):
     model = load_object(path=data_dir.make_processed_path(
@@ -167,6 +187,18 @@ for fold in range(0, 5, 1):
 
     gc.collect()
 
+# import seaborn as sns
+#
+# col = 'seconds_since_case_start'
+# sns.distplot(train_validate_file[response])
+# sns.distplot(predictions_test)
+#
+# import seaborn as sns
+#
+# col = 'seconds_since_case_start'
+# sns.distplot(train_validate_file.loc[train_validate_file[col] < 10000, col])
+# sns.distplot(test.loc[test[col] < 10000, col])
+
 test_predictions_all_folds = [
     pd.read_csv(
         data_dir.make_processed_path(
@@ -188,6 +220,8 @@ final_submission = pd.merge(
     on="REFERENCEID",
     how='inner'
 )
+
+final_submission.loc[final_submission['INV_TIME_TO_NEXT_ESCALATION'] < 0, 'INV_TIME_TO_NEXT_ESCALATION'] = 0
 # 'REFERENCEID', 'SECONDS_SINCE_CASE_START',
 final_submission[['INV_TIME_TO_NEXT_ESCALATION']].to_csv(
     path_or_buf=data_dir.make_processed_path(
@@ -205,10 +239,8 @@ final_submission_input = pd.read_csv(
         f'test_version_{MODEL_VERSION}_combined_cv.csv')
 )
 
-import seaborn as sns
-
-sns.distplot(final_submission_input['INV_TIME_TO_NEXT_ESCALATION'])
-train_validate_file = pd.read_parquet(data_dir.make_processed_path('model_files', 'train_validate_file'))
-sns.distplot(train_validate_file.loc[train_validate_file[response] < 0.08, response])
-
-train_validate_file.loc[:, response].mean()
+# sns.distplot(final_submission_input['INV_TIME_TO_NEXT_ESCALATION'])
+# train_validate_file = pd.read_parquet(data_dir.make_processed_path('model_files', 'train_validate_file'))
+# sns.distplot(train_validate_file.loc[train_validate_file[response] < 0.08, response])
+#
+# train_validate_file.loc[:, response].mean()

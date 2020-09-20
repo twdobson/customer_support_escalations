@@ -1,12 +1,3 @@
-# Baseline model
-# 1. Given all products that person has (product_1 - product_21), excluding the prediction class
-# 2. Given person demographics - age, year of birth join year
-# 3. make prediction
-
-# Product features
-# Demographic based product features
-
-# from config.spark_setup import launch_spark
 from pyspark.sql import functions as F
 
 from config.data_paths import data_dir
@@ -14,7 +5,7 @@ from config.env import *
 from source.utils.reader_writers.reader_writers import (
     SparkRead,
     SparkWrite,
-write_object
+    write_object
 )
 
 spark_read = SparkRead(spark=spark)
@@ -31,6 +22,8 @@ raw_comments = spark_read.csv(
 raw_comments.show(truncate=True)
 raw_comments.printSchema()
 
+raw_comments.create_unique_value_summary(columns=raw_comments.columns).orderBy('unique_count').show(truncate=False)
+raw_comments.create_null_summary().show(truncate=False)
 
 comments_column_map = {
     'REFERENCEID': 'reference_id',
@@ -72,6 +65,10 @@ raw_metadata = spark_read.csv(
     path=data_dir.make_raw_path('IBI_case_metadata_anonymized.csv')
 )
 raw_metadata.show()
+
+
+raw_metadata.create_unique_value_summary(columns=raw_metadata.columns).orderBy('unique_count').show(truncate=False)
+raw_metadata.create_null_summary().show(truncate=False)
 
 meta_data_column_map = {
     'REFERENCEID': 'reference_id',
@@ -168,6 +165,7 @@ spark_write.parquet(
     path=data_dir.make_interim_path('metadata'),
     n_partitions=10
 )
+
 
 # ******************************************************************
 # ******************** MILESTONES ***********************************
@@ -276,18 +274,18 @@ interim_response_file = (
             0
         )
     )
-    .filter(
-        F.col('in_train')==1
+        .filter(
+        F.col('in_train') == 1
     )
-    .select(
+        .select(
         'reference_id',
         'seconds_since_case_start',
         'inverse_time_to_next_escalation',
         'in_train'
     )
-    .union(
+        .union(
         test
-        .withColumn(
+            .withColumn(
             'in_train',
             F.lit(0)
         )
@@ -318,7 +316,7 @@ response_file = (
         on=['reference_id'],
         how='inner'
     )
-    .withColumn(
+        .withColumn(
         'inverse_time_to_next_escalation',
         F.col('inverse_time_to_next_escalation').cast('double')
     )
@@ -338,9 +336,6 @@ write_object(
     path=data_dir.make_processed_path('parameters', 'k_folds'),
     py_object=5
 )
-
-
-
 
 # ******************************************************************
 # ******************** ID_TO_LEMMA ***********************************

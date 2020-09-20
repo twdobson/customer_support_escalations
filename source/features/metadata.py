@@ -5,7 +5,10 @@ from pyspark.sql import functions as F
 
 from config.data_paths import data_dir
 from config.env import *
-from source.utils.ml_tools.categorical_encoders import label_encode_categorical_inplace
+from source.utils.ml_tools.categorical_encoders import (
+    label_encode_categorical_inplace,
+    encode_categorical_using_mean_response_rate_inplace
+)
 from source.utils.reader_writers.reader_writers import (
     SparkRead,
     SparkWrite
@@ -31,12 +34,17 @@ ref_ids_escalated = (
         'reference_id'
     )
         .distinct()
+
 )
 ref_ids_escalated.count()
 
 metadata = spark_read.parquet(
     path=data_dir.make_interim_path('metadata')
 )
+
+ref_ids_escalated.show()
+
+# *****************************************************************************************
 
 # ******************************************************************************************
 # ************************ ESCALATION INDICATORS ******************************************
@@ -174,6 +182,49 @@ for col in columns_for_is_dummy_metadata:
 # ******************************************************************************************
 # ************************ ALL METADATA FEATURES ******************************************
 # *******************************************************************************************
+response_encoded_metadata_features = (
+    metadata
+        .join(
+        ref_ids_escalated
+            .withColumn(
+            'response',
+            F.lit(1)
+        )
+        ,
+        on=['reference_id'],
+        how='left'
+    )
+        .na
+        .fill(
+        value=0,
+        subset='response'
+    )
+)
+columns_to_mean_response_rate_encode = [
+    'initial_user_group_id',
+    # 'med_project_id',
+    'med_project_area',
+    'primary_product_id',
+    'branch_code',
+    'country',
+    'site_company_o_id',
+    'agent_id'
+]
+
+mean_encoded_columns = [
+    f'mean_response_rate_{col}'
+    for col
+    in columns_to_mean_response_rate_encode
+]
+
+for col in columns_to_mean_response_rate_encode:
+    response_encoded_metadata_features = encode_categorical_using_mean_response_rate_inplace(
+        df=response_encoded_metadata_features,
+        categorical_column=col,
+        response_column='response'
+    )
+
+
 
 metadata_features = (
     metadata
@@ -188,6 +239,15 @@ metadata_features = (
         .fillna(
         value=0,
         subset=['is_cloud']
+    )
+    .join(
+        response_encoded_metadata_features
+            .select(
+            *['reference_id'] + mean_encoded_columns
+        ),
+        on=['reference_id'],
+        how='inner'
+
     )
         .join(
         metadata_is_in_escalated,
@@ -206,9 +266,6 @@ metadata_features = (
     )
 )
 
-metadata_features.show()
-metadata_features.count()  # 53635
-print(len(metadata_features.columns))
 
 spark_write.parquet(
     df=metadata_features,
@@ -221,6 +278,5 @@ metadata_features = spark_read.parquet(
 )
 
 metadata_features.show()
-metadata_features.count()
-len(metadata_features.columns)
-
+print(f" metadata has {metadata_features.count()} rows")
+print(f" metadata has {len(metadata_features.columns)} columns")

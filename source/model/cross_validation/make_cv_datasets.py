@@ -1,23 +1,26 @@
 # from config.env import *
-import pandas as pd
-from config.pandas_output import *
-
 import gc
 import os
+
+import lightgbm as lgb
+
 from config.data_paths import data_dir
+from config.pandas_output import *
 from source.utils.reader_writers.reader_writers import write_object, load_object
 
 # feature_columns_top = list(pd.read_csv(data_dir.make_processed_path('top_features.csv'))['feature'])
-response = 'inverse_time_to_next_escalation'
+response = 'response'
 
 print('reading in model file')
 train_validate_file = pd.read_parquet(data_dir.make_processed_path('model_files', 'train_validate_file'))
-# train_validate_file['vendor_id'] = train_validate_file['vendor_id'].astype('int64')
 print(train_validate_file.dtypes)
 print(train_validate_file.head())
 non_feature_columns = [
     'reference_id'
 ]
+
+train_validate_file['q'] = round(train_validate_file['reference_id'].rank(pct=True),3)
+train_validate_file.groupby('q')[response].mean().plot()
 
 feature_columns = (
     train_validate_file
@@ -46,7 +49,6 @@ for fold_name in validation_fold_names:
         path=data_dir.make_processed_path('parameters', 'cv_indices', fold_name),
         py_object=cv_indices
     )
-
 
 categorical_features = [
     # 'vendor_id'

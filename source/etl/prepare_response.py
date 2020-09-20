@@ -17,6 +17,17 @@ case_status_history = spark_read.parquet(
 
 test = spark_read.parquet(
     path=data_dir.make_interim_path('test')
+).withColumn(
+    'inverse_time_to_next_escalation',
+    F.col('inverse_time_to_next_escalation').cast('double')
+)
+
+milestones = spark_read.parquet(
+    path=data_dir.make_interim_path('milestones')
+)
+
+comments = spark_read.parquet(
+    path=data_dir.make_interim_path('comments')
 )
 
 case_status_history.show()
@@ -189,6 +200,12 @@ response_file = (
 response_file.show()
 response_file.count()  # 52968
 
+spark_write.parquet(
+response_file,
+    path=data_dir.make_processed_path('model_files', 'response_file'),
+    n_partitions=10
+)
+
 decision_times = (
     response_file
         .drop(
@@ -196,32 +213,95 @@ decision_times = (
     )
 )
 
-
 case_status_history.count()
 case_status_history.drop_duplicates().count()
 
 history_with_cutoff_times = (
     case_status_history
-    .join(
+        .join(
         decision_times,
         on=['reference_id'],
         how='inner'
     )
-    .filter(
+        .filter(
         F.col('seconds_since_case_start') <= F.col('decision_time')
     )
 )
 
-history_with_cutoff_times.count() 
+spark_write.parquet(
+    df=history_with_cutoff_times,
+    path=data_dir.make_processed_path('history_with_cutoff_times'),
+    n_partitions=10
+)
 
+history_with_cutoff_times.count()
 
-# other_training_targets[, target := 0]
-#
-# training_targets <- rbind(training_targets, other_training_targets)
-# training_targets <- training_targets[!(REFERENCEID %in% test_ids)]
-# setkey(training_targets, REFERENCEID)
-#
-# dim(training_targets)
-# head(training_targets)
-#
-# training_targets[, mean(target)]
+milestones_with_cutoff_times = (
+    milestones
+        .join(
+        decision_times,
+        on=['reference_id'],
+        how='inner'
+    )
+        .filter(
+        F.col('seconds_since_case_start') <= F.col('decision_time')
+    )
+)
+
+milestones_with_cutoff_times.show()
+milestones_with_cutoff_times.count()
+
+spark_write.parquet(
+    df=milestones_with_cutoff_times,
+    path=data_dir.make_processed_path('milestones_with_cutoff_times'),
+    n_partitions=10
+)
+
+milestones_with_cutoff_times = spark_read.parquet(
+    data_dir.make_processed_path('milestones_with_cutoff_times')
+)
+
+(
+    milestones_with_cutoff_times
+    .filter(
+        F.col('reference_id')==100052
+    )
+    .show()
+)
+(
+    milestones_with_cutoff_times
+    .filter(
+        F.col('reference_id')==100052
+    )
+    .count()
+)
+
+# 100052
+
+comments_with_cutoff_times = (
+    comments
+        .join(
+        decision_times,
+        on=['reference_id'],
+        how='inner'
+    )
+        .filter(
+        F.col('seconds_since_case_start') <= F.col('decision_time')
+    )
+)
+
+comments_with_cutoff_times.show()
+comments_with_cutoff_times.count()
+
+spark_write.parquet(
+    df=comments_with_cutoff_times,
+    path=data_dir.make_processed_path('comments_with_cutoff_times'),
+    n_partitions=10
+)
+
+comments_with_cutoff_times = spark_read.parquet(
+    data_dir.make_processed_path('comments_with_cutoff_times')
+)
+
+comments_with_cutoff_times.show()
+print(f"rows in table comments_with_cutoff_times {comments_with_cutoff_times.count()}")
