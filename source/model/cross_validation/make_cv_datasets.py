@@ -19,8 +19,8 @@ non_feature_columns = [
     'reference_id'
 ]
 
-train_validate_file['q'] = round(train_validate_file['reference_id'].rank(pct=True),3)
-train_validate_file.groupby('q')[response].mean().plot()
+# train_validate_file['q'] = round(train_validate_file['reference_id'].rank(pct=True),3)
+# train_validate_file.groupby('q')[response].mean().plot()
 
 feature_columns = (
     train_validate_file

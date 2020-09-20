@@ -46,6 +46,7 @@ escalation_starts = (
     )
 )
 
+escalation_starts.count()  # 646
 escalation_starts.filter(F.col('reference_id') == 100087).show()
 
 escalation_points_distribution = (
@@ -73,7 +74,7 @@ escalation_points_distribution = (
         F.avg('escalation_point_relative_to_case_duration').alias('average_percentile_escalation_point')
     )
 )
-escalation_points_distribution.withColumn('r', F.round(F.col("average_percentile_escalation_point"), 1)).show(n=30)
+escalation_points_distribution.withColumn('r', F.round(F.col("average_percentile_escalation_point"), 2)).show(n=100)
 
 escalation_training_ids = (
     escalation_starts
@@ -101,7 +102,13 @@ escalation_training_targets = (
     )
 )
 
-escalation_training_targets.filter(F.col('reference_id') == 100227).show()
+escalation_training_targets.filter(F.col('reference_id') == 100227).show()  # |      100227|   0|0.991052993805919|
+escalation_training_targets.filter(F.col('reference_id') == 100239).show()  # |      100239| 7864270|0.975202320620337|
+
+escalation_training_targets.count()  # 646
+
+######################### NON ESCALATION ##################################################################
+###########################################################################################################
 
 non_escalation_case_status_history = (
     case_status_history
@@ -111,7 +118,7 @@ non_escalation_case_status_history = (
         how='left_anti'
     )
 )
-non_escalation_case_status_history.count()
+non_escalation_case_status_history.count()  # 783586
 
 non_escalation_decision_times = (
     non_escalation_case_status_history
@@ -140,8 +147,8 @@ non_escalation_decision_times = (
         F.col('random_row_rank_for_sampling') == 1
     )
 )
-non_escalation_case_status_history.count()
-non_escalation_decision_times.count()
+non_escalation_case_status_history.count()  # 783586
+non_escalation_decision_times.count()  # 52989
 
 non_escalation_training_targets = (
     non_escalation_decision_times
@@ -166,7 +173,22 @@ non_escalation_training_targets = (
 )
 
 non_escalation_training_targets.show()
-non_escalation_training_targets.count()
+non_escalation_training_targets.count()  # 51443 (we loose 52989 - 51443 = 1546)
+non_escalation_training_targets.groupBy().agg(F.avg('decision_time').alias('average_decision_time')).show()  # 1164225
+
+# TODO see who we are dropping here and why
+(
+    non_escalation_decision_times
+        .join(
+        non_escalation_case_status_history,
+        on=['reference_id'],
+        how='inner'
+    )
+        .filter(
+        F.col('seconds_since_case_start') == F.col('time_cut')
+    )
+        .count()  # 1545
+)
 
 train_validation_targets = (
     escalation_training_targets
@@ -199,9 +221,10 @@ response_file = (
 
 response_file.show()
 response_file.count()  # 52968
+test.groupBy().agg(F.avg('seconds_since_case_start').alias('average_decision_time')).show()  # 729856.2922037095
 
 spark_write.parquet(
-response_file,
+    response_file,
     path=data_dir.make_processed_path('model_files', 'response_file'),
     n_partitions=10
 )
@@ -263,17 +286,17 @@ milestones_with_cutoff_times = spark_read.parquet(
 
 (
     milestones_with_cutoff_times
-    .filter(
-        F.col('reference_id')==100052
+        .filter(
+        F.col('reference_id') == 100052
     )
-    .show()
+        .show()
 )
 (
     milestones_with_cutoff_times
-    .filter(
-        F.col('reference_id')==100052
+        .filter(
+        F.col('reference_id') == 100052
     )
-    .count()
+        .count()
 )
 
 # 100052

@@ -280,3 +280,6 @@ metadata_features = spark_read.parquet(
 metadata_features.show()
 print(f" metadata has {metadata_features.count()} rows")
 print(f" metadata has {len(metadata_features.columns)} columns")
+
+
+metadata_features.groupby().agg(*[F.avg(col) for col in metadata_features.columns if 'dummy' in col]).show()

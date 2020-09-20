@@ -9,7 +9,8 @@ from config.env import *
 from source.etl.constants_and_parameters import TIME_INTERVAL
 from source.utils.ml_tools.categorical_encoders import (
     one_hot_encode_categorical,
-    label_encode_categorical_inplace
+    label_encode_categorical_inplace,
+    encode_categorical_using_mean_response_rate_inplace
 )
 from source.utils.reader_writers.reader_writers import (
     SparkRead,
@@ -224,7 +225,6 @@ base_table_case_status_history_features = (
 helper_columns = [
     'comments_words_in_notes',
     'seconds_since_previous_comment'
-
 ]
 
 non_distinct_columns = [
@@ -239,8 +239,61 @@ base_table_case_status_history_features.select(['reference_id'] + non_distinct_c
 base_table_case_status_history_features.select(['reference_id'] + non_distinct_columns).drop_duplicates().count()
 comments_with_cutoff_times.select('reference_id').drop_duplicates().count()
 
+
+# **************************************** COLLATING FEATURES **********************************
+
+response_encoded_metadata_features = (
+    base_table_case_status_history_features
+        .join(
+        ref_ids_escalated
+            .withColumn(
+            'response',
+            F.lit(1)
+        )
+        ,
+        on=['reference_id'],
+        how='left'
+    )
+        .na
+        .fill(
+        value=0,
+        subset='response'
+    )
+)
+
+columns_to_mean_response_rate_encode = [
+    'last_label_encoded_comment_type'
+    # 'cutoff_case_severity_level'
+]
+
+mean_encoded_columns = [
+    f'mean_response_rate_{col}'
+    for col
+    in columns_to_mean_response_rate_encode
+]
+response_encoded_metadata_features = encode_categorical_using_mean_response_rate_inplace(
+    df=response_encoded_metadata_features,
+    categorical_column="last_label_encoded_comment_type",
+    response_column='response'
+)
+# response_encoded_metadata_features = encode_categorical_using_mean_response_rate_inplace(
+#     df=response_encoded_metadata_features,
+#     categorical_column="first_label_encoded_comment_type",
+#     response_column='response'
+# )
+
+### Mean encoding done
+
 comments_features = (
     base_table_case_status_history_features
+        .join(
+        response_encoded_metadata_features
+            .select(
+            *['reference_id', 'seconds_since_case_start'] + mean_encoded_columns
+        ),
+        on=['reference_id', 'seconds_since_case_start'],
+        how='inner'
+    )
         .select(*['reference_id'] + non_distinct_columns)
         .drop_duplicates()
 )
@@ -255,7 +308,8 @@ comments_features = spark_read.parquet(
     path=data_dir.make_feature_path('comments')
 )
 comments_features.show()
-print(f'rows in milestone features {comments_features.count()}')
+print(f'rows in milestone features {comments_features.count()}')  # 52967
+print(f'columns in milestone features {len(comments_features.columns)}')
 
 # next_to_last_comment_type = as.character(first(last(COMMENT_TYPE, 2))),
 # next_to_last_comment_note_length = length(strsplit(first(last(NOTES, 2)), " ")[[1]]),

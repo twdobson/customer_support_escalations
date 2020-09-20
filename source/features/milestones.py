@@ -7,7 +7,10 @@ from pyspark.sql import functions as F
 from config.data_paths import data_dir
 from config.env import *
 from source.etl.constants_and_parameters import TIME_INTERVAL
-from source.utils.ml_tools.categorical_encoders import label_encode_categorical_inplace
+from source.utils.ml_tools.categorical_encoders import (
+    label_encode_categorical_inplace,
+    encode_categorical_using_mean_response_rate_inplace
+)
 from source.utils.reader_writers.reader_writers import (
     SparkRead,
     SparkWrite
@@ -23,6 +26,22 @@ test = spark_read.parquet(
 milestones_with_cutoff_times = spark_read.parquet(
     path=data_dir.make_processed_path('milestones_with_cutoff_times')
 )
+
+case_status_history = spark_read.parquet(
+    path=data_dir.make_interim_path('case_status_history')
+)
+ref_ids_escalated = (
+    case_status_history
+        .filter(
+        F.col("inverse_time_to_next_escalation") > 0
+    )
+        .select(
+        'reference_id'
+    )
+        .distinct()
+
+)
+ref_ids_escalated.count()
 
 milestones_with_cutoff_times.show()
 
@@ -70,14 +89,14 @@ base_table_milestone_features = (
                 .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         )
     )
-        .withColumn(
-        'second_last_milestone_id',
-        F.lag('milestone_id', 2).over(
-            Window
-                .partitionBy('reference_id')
-                .orderBy(F.asc('seconds_since_case_start'))
-        )
-    )
+        #     .withColumn(
+        #     'second_last_milestone_id',
+        #     F.lag('milestone_id', 2).over(
+        #         Window
+        #             .partitionBy('reference_id')
+        #             .orderBy(F.asc('seconds_since_case_start'))
+        #     )
+        # )
         .withColumn(
         'last_milestone_id_time_occurrence',
         F.last('seconds_since_case_start').over(
@@ -87,14 +106,14 @@ base_table_milestone_features = (
                 .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         )
     )
-        .withColumn(
-        'second_last_milestone_id_time_occurrence',
-        F.lag('seconds_since_case_start', 2).over(
-            Window
-                .partitionBy('reference_id')
-                .orderBy(F.asc('seconds_since_case_start'))
-        )
-    )
+        #     .withColumn(
+        #     'second_last_milestone_id_time_occurrence',
+        #     F.lag('seconds_since_case_start', 2).over(
+        #         Window
+        #             .partitionBy('reference_id')
+        #             .orderBy(F.asc('seconds_since_case_start'))
+        #     )
+        # )
         .withColumn(
         'unique_number_of_milestone_ids',
         F.size(
@@ -215,15 +234,15 @@ base_table_milestone_features = (
 
         )
     )
-        .withColumn(
-        'length_of_second_last_milestone_description',
-        F.lag('length_of_milestone_description', 2).over(
-            Window
-                .partitionBy('reference_id')
-                .orderBy(F.asc('seconds_since_case_start'))
-
-        )
-    )
+        #     .withColumn(
+        #     'length_of_second_last_milestone_description',
+        #     F.lag('length_of_milestone_description', 2).over(
+        #         Window
+        #             .partitionBy('reference_id')
+        #             .orderBy(F.asc('seconds_since_case_start'))
+        #
+        #     )
+        # )
 
         .withColumn(
         'is_milestone_note_6763',
@@ -289,14 +308,14 @@ base_table_milestone_features = (
                 .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
         )
     )
-        .withColumn(
-        'second_last_length_of_milestone_note',
-        F.lag('length_of_milestone_note', 2).over(
-            Window
-                .partitionBy('reference_id')
-                .orderBy(F.asc('seconds_since_case_start'))
-        )
-    )
+        # .withColumn(
+        #     'second_last_length_of_milestone_note',
+        #     F.lag('length_of_milestone_note', 2).over(
+        #         Window
+        #             .partitionBy('reference_id')
+        #             .orderBy(F.asc('seconds_since_case_start'))
+        #     )
+        # )
         .withColumn(
         'last_length_of_note_description_null_for_6763',
         F.last('length_of_milestone_note_null_for_6763').over(
@@ -324,14 +343,64 @@ base_table_milestone_features = (
 
 )
 
+# **************************************** COLLATING FEATURES **********************************
+
+response_encoded_metadata_features = (
+    base_table_milestone_features
+        .join(
+        ref_ids_escalated
+            .withColumn(
+            'response',
+            F.lit(1)
+        )
+        ,
+        on=['reference_id'],
+        how='left'
+    )
+        .na
+        .fill(
+        value=0,
+        subset='response'
+    )
+)
+columns_to_mean_response_rate_encode = [
+    'last_milestone_id'
+    # 'second_last_milestone_id'
+]
+
+mean_encoded_columns = [
+    f'mean_response_rate_{col}'
+    for col
+    in columns_to_mean_response_rate_encode
+]
+
+for col in columns_to_mean_response_rate_encode:
+    response_encoded_metadata_features = encode_categorical_using_mean_response_rate_inplace(
+        df=response_encoded_metadata_features,
+        categorical_column=col,
+        response_column='response'
+    )
+
+### Mean encoding done
+
 milestone_features = (
     base_table_milestone_features
-    .filter(
-        F.col('reverse_order_row_number_seconds_since_case_start')==1
+        .filter(
+        F.col('reverse_order_row_number_seconds_since_case_start') == 1
+    )
+        .join(
+        response_encoded_metadata_features
+            .select(
+            *['reference_id', 'seconds_since_case_start'] + mean_encoded_columns
+        ),
+        on=['reference_id', 'seconds_since_case_start'],
+        how='inner'
     )
         .drop(
         *milestone_columns_to_drop
-    ).drop(
+    )
+        .drop_duplicates()
+        .drop(
         *[
             'seconds_since_previous_milestone',
             'length_of_milestone_description',
@@ -344,7 +413,7 @@ milestone_features = (
             'last_milestone_description'
         ]
     )
-        .drop_duplicates()
+
 )
 
 spark_write.parquet(
@@ -357,7 +426,8 @@ milestone_features = spark_read.parquet(
     path=data_dir.make_feature_path('milestone')
 )
 milestone_features.show()
-print(f'rows in milestone features {milestone_features.count()}')
+print(f'rows in milestone features {milestone_features.count()}')  # 52966 (approx) - again - 52966
+print(f'rows in milestone features {len(milestone_features.columns)}')
 
 # unique_terms_in_milestone_desc = uniqueN(unlist(strsplit(MILESTONEDESCRIPTION, " "))),
 # mean_unique_terms_in_milestone_desc = mean(sapply(strsplit(MILESTONEDESCRIPTION, " "), uniqueN)),

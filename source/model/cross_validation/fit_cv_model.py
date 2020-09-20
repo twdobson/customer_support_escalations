@@ -20,7 +20,7 @@ from source.utils.reader_writers.reader_writers import load_object, write_object
 from source.utils.trained_model_information import TrainedModelInformation
 
 response = 'response'
-MODEL_VERSION = "2_baseline_recreated"
+MODEL_VERSION = "3_baseline_recreated"
 MODEL_KEY_COLUMN = 'reference_id'
 
 indices = load_object(path=data_dir.make_processed_path('parameters', 'cv_indices', 'cross_validation_fold_0'))
@@ -34,7 +34,7 @@ params = {
     'objective': 'rmse',
     'n_jobs': -1,
     'seed': 10,
-    'learning_rate': 0.01,
+    'learning_rate': 0.04,
     'bagging_fraction': 0.85,
     'bagging_freq': 1,
     'colsample_bytree': 0.85,
